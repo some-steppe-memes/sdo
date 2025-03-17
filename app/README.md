@@ -68,3 +68,21 @@
 
  - get_users():
     Возвращает всех пользователей из базы данных.
+
+ - get_facultyname(faculty_id):
+    Возвращает название факультета по ID
+
+ - get_groupname(group_id):
+    Возвращает название группы по ID
+
+ - get_faculy_by_group(group_id):
+    Возвращает факультет по названию или ID группы
+
+ - get_groups_by_faculty(faculty_id):
+    Возвращает все группы данного факультета по ID
+
+ - get_users_by_faculty(faculty_id):
+    Возвращает всеx студентов данного факультета по ID
+
+ - get_users_by_group(group_id):
+     Возвращает всеx студентов данной группы по ID
