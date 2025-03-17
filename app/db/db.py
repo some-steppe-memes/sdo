@@ -33,6 +33,30 @@ association_table = Table(
     Column('subject_id', Integer, ForeignKey('Subject.id'), primary_key=True)
 )
 
+class Faculty(Base):
+    __tablename__ = 'Faculty'
+
+    # Fields
+    id = Column(Integer, primary_key=True)
+    name = Column(String(128), nullable=False)
+
+    # Relationships
+    group = relationship('Group', back_populates='faculty', cascade='all, delete-orphan')
+    
+
+class Group(Base):
+    __tablename__ = 'Group'
+
+    # Fields
+    id = Column(Integer, primary_key=True)
+    name = Column(String(128), nullable=False)
+
+    # ForeignKeys
+    Faculty_id = Column(Integer, ForeignKey('Faculty.id'), nullable=False)
+
+    # Relationships
+    faculty = relationship('Faculty', back_populates='group') 
+    user = relationship('User', back_populates='group', cascade='all, delete-orphan')
 
 class User(Base):
     __tablename__ = 'User'
@@ -45,11 +69,13 @@ class User(Base):
     username = Column(String(64), unique=True, nullable=False)
     password = Column(String(255), nullable=False)
     roleType = Column(RoleTypeEnum, nullable=False, default='student')
-    studyGroup = Column(String(32), nullable=False)
     form_education = Column(String(255), nullable=False, default='Не указано')
-    faculty = Column(String(255), nullable=False, default='Не указано')
+
+    # ForeignKeys
+    Group_id = Column(Integer, ForeignKey('Group.id'), nullable=False)
 
     # Relationships
+    group = relationship('Group', back_populates='user')
     solutions = relationship('Solution', back_populates='user', cascade="all, delete-orphan")
     subjects = relationship('Subject', secondary=association_table, back_populates='users')
     subject_grades = relationship("UserSubjectGrade", order_by="UserSubjectGrade.id", back_populates="user")
@@ -158,6 +184,71 @@ class TestResult(Base):
     testCase = relationship('TestCase', back_populates='testResult', uselist=False)
     solution = relationship('Solution', back_populates='testResults')
 
+def get_facultyname(faculty_id):
+    with Session() as session:
+        faculty = session.query(Faculty).filter_by(id=faculty_id).first()
+        if faculty:
+            return faculty.name
+        return None
+
+def get_groupname(group_id):
+    with Session() as session:
+        group = session.query(Group).filter_by(id=group_id).first()
+        if group:
+            return group.name
+        return None
+        
+def get_faculy_by_group(group_id):
+    with Session() as session:
+        try:
+            if isinstance(group_id, int):
+                group = session.query(Group).filter_by(id=group_id).first()
+            else:
+                group = session.query(Group).filter_by(name=group_id).first()
+    
+            if not group:
+                raise ValueError(f"Group '{group_id}' not found.")
+            
+            faculty = session.query(Faculty).filter_by(id=group.Faculty_id).first()
+            return faculty
+
+        except Exception as e:
+            session.rollback()
+            
+
+def get_groups_by_faculty(faculty_id):
+    with Session() as session:
+        groups = session.query(Group).filter_by(Faculty_id=faculty_id).all()
+        
+        if not groups:
+            print(f"No groups found for faculty with ID {faculty_id}.")
+            return []
+        
+        return groups
+
+def get_users_by_group(group_id):
+    with Session() as session:
+        users = session.query(User).filter_by(Group_id=group_id).all()
+        
+        if not users:
+            print(f"No users found for group with ID {group_id}.")
+            return []
+        
+        return users
+    
+
+def get_users_by_faculty(faculty_id):
+    with Session() as session:
+        users = []
+        groups = get_groups_by_faculty(faculty_id)
+        for i in groups:
+            users.append(get_users_by_group(i.id))
+
+        if not users:
+            print(f"No users found for faculty with ID {faculty_id}.")
+            return []
+        
+        return users
 
 def add_user_subject_grade(user_id, subject_id, grade):
     """
@@ -210,7 +301,7 @@ def validate_user(username: str, password: str) -> Union[dict, bool]:
                 "user_id": user.id,
                 "username": user.username,
                 "roletype": user.roleType,
-                "studygroup": user.studyGroup
+                "studygroup": get_groupname(user.Group_id)
             }
         return False
 
@@ -233,9 +324,8 @@ def get_user_data(username: str) -> UserSchema:
                 middle_name=user.middle_name,
                 password=user.password,
                 roleType=user.roleType,
-                studyGroup=user.studyGroup,
-                form_education=user.form_education,
-                faculty=user.faculty
+                studyGroup=get_groupname(user.Group_id),
+                form_education=user.form_education
             )
 
         return UserSchema()
@@ -248,7 +338,7 @@ def add_user(register_data: RegisterRequest) -> Union[dict, str]:
     :param register_data: The data of the user to be added.
     :param username: The username of the user.
     :param password: The password of the user.
-    :param studygroup: The study group of the user.
+    :param Group_id: The study group of the user.
     :return: A dictionary with user information if the user is added successfully, or an error message.
     """
     new_user = User(
@@ -258,9 +348,8 @@ def add_user(register_data: RegisterRequest) -> Union[dict, str]:
         username=register_data.username,
         password=register_data.password,
         roleType='student',  # Default role type
-        studyGroup=register_data.group_name,
         form_education='Бюджет',
-        faculty='Информационные системы и технологии'  # Default faculty
+        Group_id = register_data.idgroup
     )
     with Session() as session:
         try:
@@ -269,23 +358,21 @@ def add_user(register_data: RegisterRequest) -> Union[dict, str]:
             return {
                 "username": new_user.username,
                 "roletype": new_user.roleType,
-                "studygroup": new_user.studyGroup,
                 "form_education": new_user.form_education,
-                "faculty": new_user.faculty
+                "studygroup": new_user.Group_id  
             }
         except IntegrityError:
             session.rollback()
             return "User not added"
 
 
-def add_user_test(username, password, role_type='student', study_group='-', form_education='-', faculty='-',
+def add_user_test(username, password, role_type='student', study_group='', form_education='-', 
                   first_name='Иван', last_name='Иванов', middle_name='Иванович'):
     """
     Добавляет нового пользователя в базу данных.
     :param first_name:
     :param last_name:
     :param middle_name:
-    :param faculty:
     :param form_education:
     :param username: Имя пользователя (уникальное)
     :param password: Пароль пользователя
@@ -313,9 +400,8 @@ def add_user_test(username, password, role_type='student', study_group='-', form
                 username=username,
                 password=password,
                 roleType=role_type,
-                studyGroup=study_group,
                 form_education=form_education,
-                faculty=faculty
+                Group_id=study_group
             )
             session.add(new_user)
             session.commit()
@@ -828,23 +914,6 @@ def add_test_result(passed, test_case_id, solution_id):
             # В случае ошибки откатываем изменения и выводим информацию об ошибке
             session.rollback()
             print(f"Error adding test result: {e}")
-            raise
-
-
-def get_users_by_group(study_group):
-    """
-    Получает всех пользователей, которые принадлежат указанной учебной группе.
-
-    :param study_group: Название учебной группы
-    :return: Список пользователей (объекты класса User)
-    """
-    with Session() as session:
-        try:
-            # Получаем всех пользователей, принадлежащих к указанной учебной группе
-            users = session.query(User).filter_by(studyGroup=study_group).all()
-            return users  # Возвращаем список пользователей
-        except Exception as e:
-            print(f"Error retrieving users for study group {study_group}: {e}")
             raise
 
 
